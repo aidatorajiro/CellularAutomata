@@ -17,6 +17,7 @@ extra-deps:
 - reflex-0.4.0
 - reflex-dom-0.3
 - ghcjs-dom-0.2.4.0
+- safe-0.3.14
 
 flags: {}
 

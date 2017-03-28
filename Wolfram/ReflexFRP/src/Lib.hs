@@ -8,6 +8,7 @@ import Reflex.Dom
 import Data.IORef
 import Data.Foldable
 import Data.Bits
+import Safe (readMay)
 
 width :: Int
 width = 100
@@ -15,17 +16,14 @@ width = 100
 height :: Int
 height = 50
 
-rule :: Int
-rule = 90
-
-getCellValue :: Int -> Int -> Int -> Int
-getCellValue a b c = 
+getCellValue :: Int -> Int -> Int -> Int -> Int
+getCellValue rule a b c = 
     let x = 2^(a * 4 + b * 2 + c)
      in if rule .&. x == x then 1 else 0
 
-wolfram :: [Int] -> [[Int]]
-wolfram initial_state = 
-    let arr = wolfram initial_state
+wolfram :: Int -> [Int] -> [[Int]]
+wolfram rule initial_state = 
+    let arr = wolfram rule initial_state
      in map (\x -> map (\y ->
         let ax = x - 1
             bx = x
@@ -35,21 +33,45 @@ wolfram initial_state =
             then -1
             else
                 if abcy == -1 -- 上端に来ていたら、initial_stateから出す
-                then getCellValue (initial_state !! ax) (initial_state !! bx) (initial_state !! cx)
+                then getCellValue rule (initial_state !! ax) (initial_state !! bx) (initial_state !! cx)
                 else 
                     if arr !! ax !! abcy == -1 || arr !! cx !! abcy == -1 --それ以外の場合で、両端がアウトでなければ、arrから出す
                     then -1
-                    else getCellValue (arr !! ax !! abcy) (arr !! bx !! abcy) (arr !! cx !! abcy)) $ take height [0..]) $ take width [0..]
+                    else getCellValue rule (arr !! ax !! abcy) (arr !! bx !! abcy) (arr !! cx !! abcy)) $ take height [0..]) $ take width [0..]
 
 button_attrsDyn :: MonadWidget t m => Dynamic t (M.Map String String) -> m (El t, Event t ())
 button_attrsDyn attrsDyn = do
     (btn, _) <- elDynAttr' "div" attrsDyn $ text ""
     return (btn, domEvent Click btn)
 
-makeStyle = el "style" $ text ".cell { width: 12px; height:12px; position: absolute; } .button { width: 10px; height:10px; border: 1px gray solid; }"
+normal_button :: MonadWidget t m => String -> m (El t, Event t ())
+normal_button value = do
+    (btn, _) <- el' "button" $ text value
+    return (btn, domEvent Click btn)
+
+makeStyle = el "style" $ text "\
+\.cell {\
+\    width: 12px;\
+\    height:12px;\
+\    position: absolute;\
+\}\
+\.button {\
+\    width: 10px;\
+\    height:10px;\
+\    border: 1px gray solid;\
+\}\
+\.releWrapper {\
+\    opacity: 0.8;\
+\    z-index: 999;\
+\    position: absolute;\
+\    background: white;\
+\    padding: 10px;\
+\    top: 16px;\
+\    left: 12px;\
+\}"
 
 makeCells = elClass "div" "wrapper" $ do
-    inputs <- mapM (\x -> mdo
+    inputs_arr <- mapM (\x -> mdo
         bool <- toggle False events
         num <- forDyn bool $ \b -> if b == True then 1 else 0
         attrsDyn <- forDyn num $ \n -> M.fromList [
@@ -58,9 +80,21 @@ makeCells = elClass "div" "wrapper" $ do
         (btn, events) <- button_attrsDyn attrsDyn
         return num) $ take width [0..]
     
-    inputs_dynarr <- foldrM (\x y -> combineDyn (:) x y) (constDyn []) inputs
+    inputsDyn <- foldrM (\x y -> combineDyn (:) x y) (constDyn []) inputs_arr
     
-    cell_state <- forDyn inputs_dynarr $ \a -> wolfram a
+    ruleDyn <- elClass "div" "releWrapper" $ do
+        text "rulecode: "
+        ruleInput <- textInput def
+        ruleInputDyn <- mapDyn (maybe 90 id . readMay) (_textInput_value ruleInput)
+        (button, click) <- normal_button "Set"
+        ruleDyn <- foldDyn (\e p -> e) 90 $ tagDyn ruleInputDyn click
+        el "br" $ do
+            return ()
+        text "current: "
+        display ruleDyn
+        return ruleDyn
+    
+    cell_state <- combineDyn (\rule inputs -> wolfram rule inputs) ruleDyn inputsDyn 
     
     cells <- mapM (\x -> mapM (\y -> do
         num <- forDyn cell_state $ \s -> s !! x !! y
